@@ -6,6 +6,7 @@
         <div class="operate-box">
             <v-btn variant="tonal" @click="startPath">Start</v-btn>
             <v-btn variant="tonal" @click="pausePath">Pause</v-btn>
+            <v-btn variant="tonal" @click="resumePath">Resume</v-btn>
             <v-btn variant="tonal" @click="stopPath">Stop</v-btn>
         </div>
     </div>
@@ -46,8 +47,21 @@ export default {
                 'lng': 116.307223,
                 'lat': 40.056379
             }],
+            type: 'track',
+            // TrackAnimation
+            trackAnimation: null,
+            // LuShu
+            lushu: null,
+            // Track
             track: null,
-            lushu: null
+            trackData: [],
+            trackStep: null,
+            trackRoad: null,
+            movePoint: null,
+            trackAni: null,
+            trackStart: null,
+            trackIndex: 0,
+            trackFinishIndex: 0
         }
     },
     mounted() {
@@ -64,7 +78,8 @@ export default {
             this.initPolygon(this.city.name)
             this.initMarker(this.city.center)
             // this.addTrackAnimation()
-            this.addLuShu()
+            // this.addLuShu()
+            this.addTrack()
         },
 
         initPolygon(city) {
@@ -94,23 +109,25 @@ export default {
             this.map.addOverlay(marker)
         },
 
+        // TrackAnimation
         addTrackAnimation() {
             this.map.centerAndZoom(new BMapGL.Point(116.297611, 40.047363), 17)
             const points = this.path.map(item => {
                 return new BMapGL.Point(item.lng, item.lat)
             })
             const line = new BMapGL.Polyline(points)
-            this.track = new BMapGLLib.TrackAnimation(this.map, line, {
+            this.trackAnimation = new BMapGLLib.TrackAnimation(this.map, line, {
                 overallView: true,
                 tilt: 30,
                 duration: 20000,
                 delay: 300
             })
             setTimeout(() => {
-                this.track.start()
+                this.trackAnimation.start()
             }, 3000)
         },
 
+        // LuShu
         addLuShu() {
             this.map.centerAndZoom(new BMapGL.Point(116.297611, 40.047363), 17)
             const points = this.path.map(item => {
@@ -130,17 +147,162 @@ export default {
             this.map.addOverlay(polyline)
         },
 
+        startLuShu() {
+            if (this.lushu) {
+                this.lushu.start()
+            }
+        },
+
+        pauseLuShu() {
+            if (this.lushu) {
+                this.lushu.pause()
+            }
+        },
+
+        stopLuShu() {
+            if (this.lushu) {
+                this.lushu.stop()
+            }
+        },
+        // Track
+        addTrack() {
+            const track = new Track.View(this.map, {
+                lineLayerOptions: {
+                    style: {
+                        strokeWeight: 8,
+                        strokeLineJoin: 'round',
+                        strokeLineCap: 'round'
+                    },
+                }
+            })
+            const trackData = this.path.map(item => {
+                const point = new BMapGL.Point(item.lng, item.lat)
+                const trackPoint = new Track.TrackPoint(point)
+                return trackPoint
+            })
+            const duration = 60000;
+            this.trackStep = duration / trackData.length
+            const trackRoad = new Track.LiveTrack({
+                // visible: false,
+                duration: this.trackStep,
+                linearTexture: [[0, '#f45e0c'], [0.5, '#f6cd0e'], [1, '#2ad61d']],
+                guideStyle: {
+                    style: {
+                        traceDisappear: false,
+                        traceStart: true,
+                        sequence: true,
+                        marginLength: 32,
+                        arrowColor: '#fff',
+                        strokeColor: 'rgba(27, 142, 236, 1)',
+                        strokeTextureUrl: 'https://mapopen-pub-jsapi.bj.bcebos.com/jsapiGlgeo/img/down.png',
+                        strokeTextureWidth: 64,
+                        strokeTextureHeight: 32
+                    }
+                }
+            })
+            trackRoad.setGuidTrackPath(trackData)
+            trackRoad.on(Track.LineCodes.GUIDE_STATUS, (e) => {
+                if (e.status === Track.GuidCodes.ADD_TO_MAP) {
+                    var guidTrack = trackRoad.getGuidTrack();
+                    guidTrack.on(Track.LineCodes.STATUS, (status) => {
+                        switch (status) {
+                            case Track.StatusCodes.FINISH:
+                                var box = trackRoad.getBBox();
+                                if (box) {
+                                    var bounds = [new BMapGL.Point(box[0], box[1]), new BMapGL.Point(box[2], box[3])];
+                                    map.setViewport(bounds);
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                    })
+                }
+            })
+            const movePoint = new Track.ModelPoint({
+                point: trackData[0].getPoint(), style: {
+                    url: 'https://mapopen-pub-jsapi.bj.bcebos.com/jsapiGlgeo/img/bus.glb',
+                    scale: 9,
+                    level: 18,
+                    rotationX: 90,
+                    rotationY: 90,
+                    rotationZ: 0
+                }
+            })
+            movePoint.setRotation(trackRoad.getGuidTrack().getStepInfoByIndex(0).angle)
+            trackRoad.setMovePoint(movePoint)
+            track.addTrackLine(trackRoad)
+            track.focusTrack(trackRoad)
+            this.track = track
+            this.trackData = trackData
+            this.trackRoad = trackRoad
+            this.movePoint = movePoint
+        },
+
+        startTrack(timestamp) {
+            if (!this.trackStart) this.trackStart = timestamp
+            const progress = timestamp - this.trackStart
+            const next = this.trackStep * (this.trackIndex - this.trackFinishIndex)
+            if (progress > next) {
+                if (this.trackIndex < this.trackData.length) {
+                    this.movePoint.moveTo(this.trackData[this.trackIndex])
+                    this.trackIndex++
+                } else {
+                    this.pauseTrack()
+                }
+            }
+            this.trackAni = requestAnimationFrame(this.startTrack)
+        },
+
+        pauseTrack() {
+            cancelAnimationFrame(this.trackAni)
+            this.trackFinishIndex = this.trackIndex
+            this.trackStart = null
+        },
+
+        resumeTrack() {
+            this.startTrack()
+        },
+
+        stopTrack() {
+            this.pauseTrack()
+            this.trackIndex = 0
+            this.trackFinishIndex = this.trackIndex
+            this.trackStart = null
+            this.trackRoad.clearTrackPoint()
+            this.movePoint.setPoint(this.trackData[0].getPoint())
+            this.movePoint.setRotation(this.trackRoad.getGuidTrack().getStepInfoByIndex(0).angle)
+        },
+
         startPath() {
-            this.lushu.start()
+            if (this.type == 'lushu') {
+                this.startLuShu()
+            } else if (this.type == 'track') {
+                this.startTrack()
+            }
         },
 
         pausePath() {
-            this.lushu.pause()
+            if (this.type == 'lushu') {
+                this.pauseLuShu()
+            } else if (this.type == 'track') {
+                this.pauseTrack()
+            }
+        },
+
+        resumePath() {
+            if (this.type == 'track') {
+                this.resumeTrack()
+            }
         },
 
         stopPath() {
-            this.lushu.stop()
-        }
+            if (this.type == 'lushu') {
+                this.stopLuShu()
+            } else if (this.type == 'track') {
+                this.stopTrack()
+            }
+        },
     }
 }
 </script>
