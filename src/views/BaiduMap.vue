@@ -55,13 +55,8 @@ export default {
             // Track
             track: null,
             trackData: [],
-            trackStep: null,
-            trackRoad: null,
-            movePoint: null,
-            trackAni: null,
-            trackStart: null,
-            trackIndex: 0,
-            trackFinishIndex: 0
+            trackLine: null,
+            trackPoint: null
         }
     },
     mounted() {
@@ -166,112 +161,70 @@ export default {
         },
         // Track
         addTrack() {
-            const track = new Track.View(this.map, {
+            this.track = new Track.View(this.map, {
                 lineLayerOptions: {
                     style: {
                         strokeWeight: 8,
                         strokeLineJoin: 'round',
                         strokeLineCap: 'round'
-                    },
-                }
-            })
-            const trackData = this.path.map(item => {
-                const point = new BMapGL.Point(item.lng, item.lat)
-                const trackPoint = new Track.TrackPoint(point)
-                return trackPoint
-            })
-            const duration = 60000;
-            this.trackStep = duration / trackData.length
-            const trackRoad = new Track.LiveTrack({
-                // visible: false,
-                duration: this.trackStep,
-                linearTexture: [[0, '#f45e0c'], [0.5, '#f6cd0e'], [1, '#2ad61d']],
-                guideStyle: {
-                    style: {
-                        traceDisappear: false,
-                        traceStart: true,
-                        sequence: true,
-                        marginLength: 32,
-                        arrowColor: '#fff',
-                        strokeColor: 'rgba(27, 142, 236, 1)',
-                        strokeTextureUrl: 'https://mapopen-pub-jsapi.bj.bcebos.com/jsapiGlgeo/img/down.png',
-                        strokeTextureWidth: 64,
-                        strokeTextureHeight: 32
                     }
                 }
             })
-            trackRoad.setGuidTrackPath(trackData)
-            trackRoad.on(Track.LineCodes.GUIDE_STATUS, (e) => {
-                if (e.status === Track.GuidCodes.ADD_TO_MAP) {
-                    var guidTrack = trackRoad.getGuidTrack();
-                    guidTrack.on(Track.LineCodes.STATUS, (status) => {
-                        switch (status) {
-                            case Track.StatusCodes.FINISH:
-                                var box = trackRoad.getBBox();
-                                if (box) {
-                                    var bounds = [new BMapGL.Point(box[0], box[1]), new BMapGL.Point(box[2], box[3])];
-                                    map.setViewport(bounds);
-                                }
-                                break;
-                            default:
-                                break;
-                        }
-                    })
+            this.trackData = this.path.map(item => {
+                let point = new BMapGL.Point(item.lng, item.lat)
+                let trackPoint = new Track.TrackPoint(point)
+                return trackPoint
+            })
+            this.trackLine = new Track.LocalTrack({
+                trackPath: this.trackData,
+                duration: 60,
+                style: {
+                    sequence: true,
+                    marginLength: 32,
+                    arrowColor: '#fff',
+                    strokeTextureUrl: '//mapopen-pub-jsapi.bj.bcebos.com/jsapiGlgeo/img/down.png',
+                    strokeTextureWidth: 64,
+                    strokeTextureHeight: 32,
+                    traceColor: [27, 142, 236]
                 }
             })
-            const movePoint = new Track.ModelPoint({
-                point: trackData[0].getPoint(), style: {
-                    url: 'https://mapopen-pub-jsapi.bj.bcebos.com/jsapiGlgeo/img/bus.glb',
-                    scale: 9,
+            this.track.addTrackLine(this.trackLine)
+            this.track.focusTrack(this.trackLine)
+            this.trackPoint = new Track.GroundPoint({
+                point: this.trackData[0].getPoint(),
+                style: {
+                    url: '//mapopen-pub-jsapi.bj.bcebos.com/jsapiGlgeo/img/car.png',
                     level: 18,
-                    rotationX: 90,
-                    rotationY: 90,
-                    rotationZ: 0
+                    scale: 1,
+                    size: new BMapGL.Size(16, 32),
+                    anchor: new BMapGL.Size(0.5, 0.5),
                 }
             })
-            movePoint.setRotation(trackRoad.getGuidTrack().getStepInfoByIndex(0).angle)
-            trackRoad.setMovePoint(movePoint)
-            track.addTrackLine(trackRoad)
-            track.focusTrack(trackRoad)
-            this.track = track
-            this.trackData = trackData
-            this.trackRoad = trackRoad
-            this.movePoint = movePoint
+            this.trackLine.setMovePoint(this.trackPoint)
         },
 
-        startTrack(timestamp) {
-            if (!this.trackStart) this.trackStart = timestamp
-            const progress = timestamp - this.trackStart
-            const next = this.trackStep * (this.trackIndex - this.trackFinishIndex)
-            if (progress > next) {
-                if (this.trackIndex < this.trackData.length) {
-                    this.movePoint.moveTo(this.trackData[this.trackIndex])
-                    this.trackIndex++
-                } else {
-                    this.pauseTrack()
-                }
+        startTrack() {
+            if (this.trackLine) {
+                this.trackLine.startAnimation()
             }
-            this.trackAni = requestAnimationFrame(this.startTrack)
         },
 
         pauseTrack() {
-            cancelAnimationFrame(this.trackAni)
-            this.trackFinishIndex = this.trackIndex
-            this.trackStart = null
+            if (this.trackLine) {
+                this.trackLine.pauseAnimation()
+            }
         },
 
         resumeTrack() {
-            this.startTrack()
+            if (this.trackLine) {
+                this.trackLine.resumeAnimation()
+            }
         },
 
         stopTrack() {
-            this.pauseTrack()
-            this.trackIndex = 0
-            this.trackFinishIndex = this.trackIndex
-            this.trackStart = null
-            this.trackRoad.clearTrackPoint()
-            this.movePoint.setPoint(this.trackData[0].getPoint())
-            this.movePoint.setRotation(this.trackRoad.getGuidTrack().getStepInfoByIndex(0).angle)
+            if (this.trackLine) {
+                this.trackLine.stopAnimation()
+            }
         },
 
         startPath() {
